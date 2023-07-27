@@ -20,6 +20,8 @@ git add patch$: "git add --patch\n"
 git show head$: "git show HEAD\n"
 git diff$: "git diff\n"
 git diff (cached | cashed)$: "git diff --cached\n"
+git latest commit$: insert("git rev-parse HEAD\n")
+git latest commit short$: insert("git rev-parse --short HEAD\n")
 
 # Convenience
 git clone clipboard:

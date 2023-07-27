@@ -1,17 +1,17 @@
+from talon import Module, Context, actions, app, registry, scope, ui, speech_system
 import os
-import platform
-import pprint
 import re
 from itertools import islice
-from typing import Union
-
-from talon import Module, actions, app, clip, registry, scope, speech_system, ui
+from typing import Any, Union
 from talon.grammar import Phrase
 
-pp = pprint.PrettyPrinter()
-
-
 mod = Module()
+
+ctx_win = Context()
+ctx_win.matches = r"""
+os: windows
+"""
+
 pattern = re.compile(r"[A-Z][a-z]*|[a-z]+|\d")
 
 
@@ -24,7 +24,6 @@ class Actions:
     def talon_add_context_clipboard_python():
         """Adds os-specific context info to the clipboard for the focused app for .py files. Assumes you've a Module named mod declared."""
         friendly_name = actions.app.name()
-        # print(actions.app.executable())
         executable = actions.app.executable().split(os.path.sep)[-1]
         app_name = create_name(friendly_name.replace(".exe", ""))
         if app.platform == "mac":
@@ -40,15 +39,16 @@ class Actions:
                 app_name, app.platform, friendly_name
             )
 
-        clip.set_text(result)
+        actions.clip.set_text(result)
 
     def talon_add_context_clipboard():
         """Adds os-specific context info to the clipboard for the focused app for .talon files"""
         friendly_name = actions.app.name()
-        # print(actions.app.executable())
         executable = actions.app.executable().split(os.path.sep)[-1]
         if app.platform == "mac":
-            result = f"os: {app.platform}\nand app.bundle: {actions.app.bundle()}\n"
+            result = "os: {}\nand app.bundle: {}\n".format(
+                app.platform, actions.app.bundle()
+            )
         elif app.platform == "windows":
             result = (
                 "os: windows\nand app.name: {}\nos: windows\nand app.exe: {}\n".format(
@@ -56,108 +56,124 @@ class Actions:
                 )
             )
         else:
-            result = f"os: {app.platform}\nand app.name: {friendly_name}\n"
+            result = "os: {}\nand app.name: {}\n".format(app.platform, friendly_name)
 
-        clip.set_text(result)
+        actions.clip.set_text(result)
+
+    def talon_get_tags() -> str:
+        """Get tags as text"""
+        return format("tags", registry.tags)
+
+    def talon_get_actions() -> str:
+        """Get actions list as text"""
+        return format("actions", registry.actions)
+
+    def talon_get_actions_long() -> str:
+        """Get long actions list as text"""
+        return format("actions", registry.decls.actions, add_desc=True)
+
+    def talon_get_actions_search(text: str) -> str:
+        """Get list of actions from search parameter"""
+        actions = filter_search(registry.decls.actions, text)
+        return format("actions", actions, add_desc=True)
+
+    def talon_get_modes() -> str:
+        """Get modes as text"""
+        return format("modes", scope.get("mode"))
+
+    def talon_get_captures() -> str:
+        """Get captures as text"""
+        return format("captures", registry.captures)
+
+    def talon_print_list_problems():
+        """Search for non alpha keys in meta lists"""
+        for n, l in registry.lists.items():
+            for ml in l:
+                for v in ml:
+                    if re.search(r"[^a-zA-Z' ]", v):
+                        print(f"{n}: {v}")
+
+    def talon_get_lists() -> str:
+        """Get lists as text"""
+        return format("lists", registry.lists)
+
+    def talon_get_core() -> str:
+        """Get core lists and captures as text"""
+        captures = filter_core(registry.decls.captures)
+        actions = filter_core(registry.decls.actions)
+        captures_string = format("captures", captures, add_desc=True)
+        actions_string = format("actions", actions, add_desc=True)
+        return f"{captures_string}\n\n{actions_string}"
 
     def talon_sim_phrase(phrase: Union[str, Phrase]):
         """Sims the phrase in the active app and dumps to the log"""
-        print("**** Simulated Phrse **** ")
+        print("**** Simulated Phrase **** ")
         print(speech_system._sim(str(phrase)))
         print("*************************")
 
-    def talon_action_find(action: str):
-        """Runs action.find for the provided action and dumps to the log"""
-        print(f"**** action.find{action} **** ")
-        print(actions.find(action))
-        print("***********************")
+    def talon_restart():
+        """Quit and relaunch the Talon app"""
+        
+    def talon_quit():
+        """Quit the talon app"""
 
-    def talon_debug_list(name: str):
-        """Dumps the contents of list to the console"""
-        print(f"**** Dumping list {name} **** ")
-
-        print(str(registry.lists[name]))
-        print("***********************")
-
-    def talon_debug_tags():
-        """Dumps the active tags to the console"""
-        print("**** Dumping active tags *** ")
-        print(str(registry.tags))
-        print("***********************")
-
-    def talon_debug_modes():
-        """Dumps active modes to the console"""
-        print("**** Active modes ****")
-        print(scope.get("mode"))
-        print("***********************")
-
-    def talon_debug_scope(name: str):
-        """Dumps the active scope information to the console"""
-        print(f"**** Dumping {name} scope ****")
-        print(scope.get(name))
-        print("***********************")
-
-    def talon_copy_list(name: str):
-        """Dumps the contents of list to the console"""
-        print(f"**** Copied list {name} **** ")
-        clip.set_text(pp.pformat(registry.lists[name]))
-        print("***********************")
-
-    def talon_debug_setting(name: str):
-        """Dumps the current setting to the console"""
-        print(f"**** Dumping setting {name} **** ")
-        print(registry.settings[name])
-        print("***********************")
-
-    def talon_debug_all_settings():
-        """Dumps all settings to the console"""
-        print("**** Dumping settings **** ")
-        print(str(registry.settings))
-        print("***********************")
-
-    def talon_get_active_context() -> str:
-        """Returns active context info"""
-        name = actions.app.name()
-        executable = actions.app.executable()
-        bundle = actions.app.bundle()
-        title = actions.win.title()
-        hostname = scope.get("hostname")
-        result = f"Name: {name}\nExecutable: {executable}\nBundle: {bundle}\nTitle: {title}\nhostname: {hostname}"
+    def as_dict(
+        arg1: Any = None, arg2: Any = None, arg3: Any = None, arg4: Any = None
+    ) -> dict:
+        """Create dict"""
+        args = actions.user.as_list(arg1, arg2, arg3, arg4)
+        if len(args) % 2 != 0:
+            raise RuntimeError("Can't create dictionary: Uneven number of arguments")
+        result = {}
+        for i in range(0, len(args), 2):
+            result[args[i]] = args[i + 1]
         return result
 
-    def talon_get_hostname() -> str:
-        """Returns the hostname"""
-        hostname = scope.get("hostname")
-        return hostname
+    def as_list(
+        arg1: Any = None, arg2: Any = None, arg3: Any = None, arg4: Any = None
+    ) -> list:
+        """Create list"""
+        return [x for x in [arg1, arg2, arg3, arg4] if x]
 
-    def talon_get_active_application_info() -> str:
-        """Returns all active app info to the cliboard"""
-        result = str(ui.active_app())
-        result += "\nActive window: " + str(ui.active_window())
-        result += "\nWindows: " + str(ui.active_app().windows())
-        result += "\nName: " + actions.app.name()
-        result += "\nExecutable: " + actions.app.executable()
-        result += "\nBundle: " + actions.app.bundle()
-        result += "\nTitle: " + actions.win.title()
-        return result
 
-    def talon_version_info() -> str:
-        """Returns talon & operation system verison information"""
-        result = (
-            f"Version: {app.version}, Branch: {app.branch}, OS: {platform.platform()}"
-        )
-        return result
+@ctx_win.action_class("user")
+class WinUserActions:
+    def talon_restart():
+        talon_app = ui.apps(pid=os.getpid())[0]
+        os.startfile(talon_app.exe)
+        talon_app.quit()
 
-    def talon_pretty_print(obj: object):
-        """Uses pretty print to dump an object"""
-        pp.pprint(obj)
+    def talon_quit():
+        talon_app = ui.apps(pid=os.getpid())[0]
+        talon_app.quit()
 
-    def talon_pretty_format(obj: object):
-        """Pretty formats an object"""
-        return pp.pformat(obj)
 
-    def talon_debug_app_windows(app: str):
-        """Pretty prints the application windows"""
-        apps = ui.apps(name=app, background=False)
-        for app in apps:
-            pp.pprint(app.windows())
+def format(title, values, add_desc=False) -> str:
+    text = f"-------- {title.upper()} ({len(values)}) ------------\n"
+    for name in sorted(values):
+        text += f"{name}"
+        if add_desc:
+            text += "()"
+        text += "\n"
+        if add_desc:
+            desc = values[name].desc.replace("\n", " ")
+            desc = re.sub(" +", " ", desc)
+            text += f"  {desc}\n"
+    text += "\n----------------------------------"
+    return text
+
+
+def filter_core(values: dict) -> dict:
+    result = {}
+    for k in values:
+        if not k.startswith("user."):
+            result[k] = values[k]
+    return result
+
+
+def filter_search(values: dict, text: str) -> dict:
+    result = {}
+    for k in values:
+        if text in k:
+            result[k] = values[k]
+    return result

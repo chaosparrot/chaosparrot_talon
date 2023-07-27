@@ -5,7 +5,6 @@ ctx.matches = r"""
 tag: user.readline
 """
 
-
 @ctx.action_class("edit")
 class EditActions:
     def delete_line():

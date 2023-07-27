@@ -300,15 +300,56 @@ class Actions:
                 and application.exe.split(os.path.sep)[-1] == name
             ):
                 return application
-        raise RuntimeError(f'App not running: "{name}"')
+        return None
 
     def switcher_focus(name: str):
         """Focus a new application by name"""
         app = actions.user.get_running_app(name)
         actions.user.switcher_focus_app(app)
 
+    def switcher_launch_or_focus_explorer():
+        """Focus an existing or a new file explorer window"""
+        app = None
+        name = "Windows Explorer"
+        for application in ui.apps(background=False):
+            if application.name == name or application.exe.split(os.path.sep)[-1] == name:
+                app = application
+
+        explorer_window = None
+        if app:
+            window_size = 0
+            invalid_titles = ["Task Switching", "Running Applications", "Program Manager", ""]
+            for window in app.windows():
+                if window.rect.width > 1000 and window.rect.height > 500 and window.rect.width * window.rect.height > window_size and \
+                    window.title not in invalid_titles:
+                    window_size = window.rect.width * window.rect.height
+                    explorer_window = window
+                    if window.title == "File Explorer":
+                        break
+
+        if explorer_window is not None:
+            actions.user.switcher_focus_window(explorer_window)
+        else:
+            actions.user.switcher_launch(name)
+
+    def switcher_launch_or_focus(name: str):
+        """Focus an application that is already running, or launches the application"""
+        app = actions.user.get_running_app(name)
+        windows_apps = get_windows_apps()
+        if app is None:
+            windows_apps = get_windows_apps()
+            if name in windows_apps:
+                actions.user.switcher_launch(windows_apps[name])
+                actions.sleep(2.0)
+            else:
+                raise RuntimeError(f"Application {name} could not be found")
+        else:
+            actions.user.switcher_focus_app(app)
+
     def switcher_focus_app(app: ui.App):
         """Focus application and wait until switch is made"""
+        if app is None:
+            raise RuntimeError(f"Application could not be focused")
         app.focus()
         t1 = time.perf_counter()
         while ui.active_app() != app:
@@ -318,6 +359,8 @@ class Actions:
 
     def switcher_focus_window(window: ui.Window):
         """Focus window and wait until switch is made"""
+        if window is None:
+            raise RuntimeError(f"Window could not be focused")
         window.focus()
         t1 = time.perf_counter()
         while ui.active_window() != window:
@@ -325,17 +368,14 @@ class Actions:
                 raise RuntimeError(f"Can't focus window: {window.title}")
             actions.sleep(0.1)
 
-    def switcher_launch(path: str):
+    def switcher_launch(path: str) -> bool:
         """Launch a new application by path (all OSes), or AppUserModel_ID path on Windows"""
-        if app.platform == "mac":
-            ui.launch(path=path)
-        elif app.platform == "linux":
-            # Could potentially be merged with OSX code. Done in this explicit
-            # way for expediency around the 0.4 release.
+        if app.platform != "windows":
+            # separate command and arguments
             cmd = shlex.split(path)[0]
             args = shlex.split(path)[1:]
             ui.launch(path=cmd, args=args)
-        elif app.platform == "windows":
+        else:
             is_valid_path = False
             try:
                 current_path = Path(path)
@@ -344,11 +384,15 @@ class Actions:
                 is_valid_path = False
             if is_valid_path:
                 ui.launch(path=path)
+                return True
             else:
                 cmd = f"explorer.exe shell:AppsFolder\\{path}"
-                subprocess.Popen(cmd, shell=False)
-        else:
-            print("Unhandled platform in switcher_launch: " + app.platform)
+                proc = subprocess.Popen(cmd, shell=False)
+                actions.sleep("100ms")
+                proc.kill()
+                proc.wait()
+                return True
+        return False
 
     def switcher_menu():
         """Open a menu of running apps to switch to"""

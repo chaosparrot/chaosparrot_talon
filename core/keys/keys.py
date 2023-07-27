@@ -21,8 +21,8 @@ alphabet_list = get_list_from_csv(
 )
 
 # used for number keys & function keys respectively
-digits = "zero one two three four five six seven eight nine".split()
-f_digits = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+digits = "zero one two tree four five six seven eight niner".split()
+f_digits = "one two tree four five six seven eight niner ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
 
 mod = Module()
 mod.list("letter", desc="The spoken phonetic alphabet")
@@ -220,6 +220,7 @@ symbol_key_words = {
     # Currencies
     "dollar": "$",
     "pound": "£",
+    "euro": "€",
 }
 
 # make punctuation words also included in {user.symbol_keys}
@@ -228,10 +229,10 @@ ctx.lists["self.punctuation"] = punctuation_words
 ctx.lists["self.symbol_key"] = symbol_key_words
 ctx.lists["self.number_key"] = {name: str(i) for i, name in enumerate(digits)}
 ctx.lists["self.arrow_key"] = {
-    "down": "down",
-    "left": "left",
-    "right": "right",
-    "up": "up",
+    "downer": "down",
+    "lefter": "left",
+    "righter": "right",
+    "upper": "up",
 }
 
 simple_keys = [
@@ -247,10 +248,6 @@ simple_keys = [
 ]
 
 alternate_keys = {
-    "wipe": "backspace",
-    "delete": "backspace",
-    #'junk': 'backspace',
-    "forward delete": "delete",
     "page up": "pageup",
     "page down": "pagedown",
 }
@@ -263,7 +260,7 @@ special_keys = {k: k for k in simple_keys}
 special_keys.update(alternate_keys)
 ctx.lists["self.special_key"] = special_keys
 ctx.lists["self.function_key"] = {
-    f"F {name}": f"f{i}" for i, name in enumerate(f_digits, start=1)
+    f"function {name}": f"f{i}" for i, name in enumerate(f_digits, start=1)
 }
 
 
@@ -276,3 +273,8 @@ class Actions:
                 getattr(actions.edit, d)()
             else:
                 raise RuntimeError(f"invalid arrow key: {d}")
+    
+    def insert_keys(keys: str):
+        """Press the keys one by one"""
+        for key in keys:
+            actions.insert(key)
