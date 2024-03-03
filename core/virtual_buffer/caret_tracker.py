@@ -2,8 +2,6 @@ from typing import List
 import re
 import platform
 
-is_macos = platform.system() == "Darwin"
-
 # CARET MARKERS
  # TODO APPEND RANDOM NUMBER FOR LESS COLLISIONS?
 _CARET_MARKER = "$CARET" # Keeps track of the exact caret position
@@ -52,6 +50,8 @@ _COARSE_MARKER = "$COARSE_CARET" # Keeps track of the line number if we arent su
 # 29 - By default, when a selection is made, going to the left places the caret on the left end of the selection, and going to the right places it on the right
 # 30 - Certain programs do not allow selection, like terminals
 class CaretTracker:
+    system: str = ""
+    is_macos: bool = False
     text_buffer: str = ""
     enable_caret_tracking: bool = True
     selecting_text: bool = False
@@ -59,7 +59,9 @@ class CaretTracker:
     selection_caret_marker = (-1, -1)
     last_caret_movement: str = ""
 
-    def __init__(self):
+    def __init__(self, system = platform.system()):
+        self.system = system
+        self.is_macos = system == "Darwin"
         self.clear()
 
     def clear(self):
@@ -84,7 +86,7 @@ class CaretTracker:
                     self.shift_down = False
                 continue
 
-            if is_macos:
+            if self.is_macos:
                 if "alt" in key:
                     self.selecting_text = "shift" in key or self.shift_down
                     key_combinations = key_modifier[0].lower().split("-")                
@@ -137,13 +139,15 @@ class CaretTracker:
             # Noop if it has already been used
             if key_used == True:
                 return key_used
-            elif "shift" in key:
+                
+            # Only track a shift down if it is the ONLY key pressed down
+            elif "shift" == key_modifier[0]:
                 self.shift_down = key_modifier[-1] == "down"
                 if self.shift_down and self.selection_caret_marker == (-1, -1):
                     self.selection_caret_marker = self.get_caret_index()
 
                 key_used = True
-            elif "left" in key:
+            elif "left" in key and not ("cmd" in key or "super" in key):
                 selecting_text = "shift" in key or self.shift_down
                 left_movements = 1
                 if len(key_modifier) >= 1 and key_modifier[-1].isnumeric():
@@ -156,7 +160,7 @@ class CaretTracker:
                     self.track_caret_left(left_movements)
                 key_used = True
                 self.last_caret_movement = "left"
-            elif "right" in key:
+            elif "right" in key and not ("cmd" in key or "super" in key):
                 selecting_text = "shift" in key or self.shift_down
                 right_movements = 1
                 if len(key_modifier) >= 1 and key_modifier[-1].isnumeric():
@@ -169,22 +173,22 @@ class CaretTracker:
                     self.track_caret_right(right_movements)
                 key_used = True
                 self.last_caret_movement = "right"
-            elif ( not is_macos and "end" in key ) or ( is_macos and ("cmd" in key or "super" in key) and "right" in key ):
+            elif ( not self.is_macos and "end" in key ) or ( self.is_macos and ("cmd" in key or "super" in key) and "right" in key ):
                 self.mark_caret_to_end_of_line()
                 key_used = True
                 self.last_caret_movement = "right"
-            elif ( not is_macos and "home" in key ) or ( is_macos and ("cmd" in key or "super" in key) and "left" in key ):
+            elif ( not self.is_macos and "home" in key ) or ( self.is_macos and ("cmd" in key or "super" in key) and "left" in key ):
                 self.mark_line_as_coarse()
                 key_used = True
                 self.last_caret_movement = "left"
-            elif "up" in key and ( not is_macos or ("cmd" not in key and "super" not in key)):
+            elif "up" in key and ( not self.is_macos or ("cmd" not in key and "super" not in key)):
                 up_movements = 1
                 if len(key_modifier) >= 1 and key_modifier[-1].isnumeric():
                     up_movements = int(key_modifier[-1])
                 for _ in range(up_movements):
                     self.mark_above_line_as_coarse()
                 key_used = True
-            elif "down" in key and ( not is_macos or ("cmd" not in key and "super" not in key)):
+            elif "down" in key and ( not self.is_macos or ("cmd" not in key and "super" not in key)):
                 down_movements = 1
                 if len(key_modifier) >= 1 and key_modifier[-1].isnumeric():
                     down_movements = int(key_modifier[-1])
@@ -608,7 +612,7 @@ class CaretTracker:
                     selection_lines.append( replaced_line[:len(replaced_line) - right[1]] )
         return "\n".join(selection_lines)
 
-    def navigate_to_position(self, line_index: int, character_from_end: int, deselection: bool = True) -> List[str]:
+    def navigate_to_position(self, line_index: int, character_from_end: int, deselection: bool = True, selecting: bool = None) -> List[str]:
         current = self.get_caret_index()
 
         keys = []
@@ -673,13 +677,14 @@ class CaretTracker:
 
         # Move to line end to have a consistent line ending, as that seems to be consistent
         if current[1] == -1:
-            keys.append( "end" )
+            keys.append("end" if not self.is_macos else "cmd-right")
             current = (current[0], 0)
 
         # Move to the right character position
         if not character_from_end == current[1] and current[1] != -1:
             char_diff = current[1] - character_from_end
-            keys.append(("left:" if char_diff < 0 else "right:") + str(abs(char_diff)))
+            renewed_selection = selecting and not deselection and not self.shift_down
+            keys.append( ("shift-" if renewed_selection else "" ) + ("left:" if char_diff < 0 else "right:") + str(abs(char_diff)))
 
         if current[0] == -1 or current[1] == -1:
             keys = []

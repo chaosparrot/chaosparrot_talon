@@ -264,28 +264,41 @@ class InputContextManager:
     def index_accessible_value(self):
         value = ""
         print( "----- CHECKING ACCESSIBLE TEXT" )
+        
+        try:
+            element = ui.focused_element()
+        except:
+            element = None
+        
         # Windows based A11Y
         if self.system == "Windows":
-            element = ui.focused_element()
             #print( "ELEMENT PATTERNS!", element.patterns)
-            #print( "SELECTION", element.text_pattern.selection )
+            #if "LegacyIAccessible" in element.patterns:
+            #    print( "LEGACY!", dir( element.legacyiaccessible_pattern ) )
+            #    print( "ROLE", element.legacyiaccessible_pattern.value )
+                #print( element.legacy_pattern )    
+            #try:
+            #    print( "SELECTION", dir(element.text_pattern.selection), element.text_pattern.selection.index(), element.text_pattern.selection.count() )
+            #except:
+            #    print( "ERROR! " )
 
             if "Text2" in element.patterns:
                 value = element.text_pattern2.document_range.text
-                print( "YEET", element.text_pattern2.caret_range.compare_endpoints("", ""))
+                #print( "YEET", element.text_pattern2.caret_range.text, dir(element.text_pattern2.caret_range) )
+                # , element.text_pattern2.caret_range.compare_endpoints("", "")
                 if self.current_context:
                     self.current_context.set_accessible_api_available("text", True)
             elif "Value" in element.patterns:
                 value = element.value_pattern.value
                 if self.current_context:
-                    self.current_context.set_accessible_api_available("text", True)                
+                    self.current_context.set_accessible_api_available("text", True)
+            #raise NotImplementedError("ARGH")
         # Mac based A11Y - Currently untested
         # Examples taken from phillco/ax_kit and tweaked afterwards
         elif self.system == "Darwin":
-            element = ui.focused_element()        
             # Has accessibility support
             if element and element.attrs:
-                value = el.get("AXValue")
+                value = element.get("AXValue")
         # Linux based A11Y - Currently unimplemented
         else:
             pass
@@ -293,6 +306,9 @@ class InputContextManager:
         # Update the visual state to accessible if a value was found        
         if value:
             self.update_visual_state(level = "accessibility")
+
+        if value is None:
+            value = ""
     
         return value
     
@@ -313,6 +329,39 @@ class InputContextManager:
         total_value = self.index_accessible_value() if total_value == "" else total_value
         results = self.find_caret_position(total_value, 1 if forced == True else 0)
         self.index_content(results[0], results[1], results[2])
+        
+    def get_accessible_cursor_indecis(self, total_value: str) -> ((int, int), (int, int)):
+        left_cursor_index = (-1, -1) 
+        right_cursor_index = (-1, -1)
+
+        try:
+            element = ui.focused_element()
+        except:
+            element = None
+
+        if element and self.system == "Darwin":
+            # Has accessibility support
+            if element.attrs:
+                ranges = element.get("AXSelectedTextRanges")
+
+                # Multiple carets / cursors - Undefined locations
+                if ranges is not None and len(ranges) > 1:
+                    return (left_cursor_index, right_cursor_index)
+                else:
+                    selected_text_range = element.get("AXSelectedTextRange")
+                    if selected_text_range is not None:
+                        left_index = selected_text_range.left
+                        right_index = selected_text_range.right
+                        
+                        # No selection - only need to check one and duplicate it
+                        left_cursor_index = self.indexer.determine_caret_position("", total_value, left_index)
+                        if left_index == right_index:
+                           right_cursor_index = left_cursor_index
+                        # Selection, need to find both cursors
+                        else:
+                           right_cursor_index = self.indexer.determine_caret_position("", total_value, right_index)
+            
+        return (left_cursor_index, right_cursor_index)
 
     def zero_width_space_insertion_index(self) -> (int, int):
         zwsp = "​"
@@ -327,6 +376,11 @@ class InputContextManager:
         undefined_positions = (total_value, (-1, -1), (-1, -1))
         before_text = ""
         after_text = ""
+        
+        # Check for accessible cursor indexes ( selection or not )
+        accessible_cursor_index = self.get_accessible_cursor_indecis(total_value)
+        if accessible_cursor_index != [(-1, -1), (-1, -1)]:
+            return [total_value, accessible_cursor_index[0], accessible_cursor_index[1]]
 
         # Find selection first if it exists
         current_clipboard = ""
@@ -476,5 +530,9 @@ class InputContextManager:
                 is_updated = True
                 self.visual_state['content_confidence'] = content_confidence
 
-        if is_updated and self.state_callback:
-            self.state_callback(self.visual_state['scanning'], self.visual_state['level'], self.visual_state['caret_confidence'], self.visual_state['content_confidence'])
+        # TODO implement non-hud visualisation
+        try:
+            if is_updated and self.state_callback:        
+                self.state_callback(self.visual_state['scanning'], self.visual_state['level'], self.visual_state['caret_confidence'], self.visual_state['content_confidence'])
+        except NotImplementedError:
+            pass
