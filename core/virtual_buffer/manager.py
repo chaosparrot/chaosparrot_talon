@@ -99,22 +99,7 @@ class VirtualBufferManager:
                 return vbm.navigate_to_token(last_token, -1, keep_selection)
         else:
             return ["end"]
-        
-    def select_phrase(self, phrase: str, until_end = False) -> List[str]:
-        self.disable_tracking()
-        self.context.ensure_viable_context()
-        self.enable_tracking()
 
-        vb = self.context.get_current_context().buffer
-
-        if self.has_phrase(phrase):
-            self.context.should_use_last_formatter(False)
-
-        if until_end:
-            return vb.select_until_end(phrase)
-        else:
-            return vb.select_phrase(phrase)
-        
     def select_phrases(self, phrases: List[str], until_end = False, for_correction=False) -> List[str]:
         self.disable_tracking()
         self.context.ensure_viable_context()
@@ -168,7 +153,7 @@ class VirtualBufferManager:
             if self_repair_match is not None:
 
                 # If we are dealing with a continuation, change the insert to remove the first few words
-                if self_repair_match.score / len(self_repair_match.scores) == EXACT_MATCH:
+                if self_repair_match.score_potential == EXACT_MATCH:
                     words = insert.split()
                     if len(words) > len(self_repair_match.scores):
                         insert = " ".join(words[len(self_repair_match.scores):])
@@ -179,25 +164,25 @@ class VirtualBufferManager:
                 # We do not support replacing initial words, only inserting, as replacing initial words requires more context about meaning
                 # ( We have no -> We have a , but not, We have no -> They have no )
                 else:
-                    first_index = self_repair_match.indices[0]
+                    first_index = self_repair_match.buffer_indices[0][0]
                     allow_initial_replacement = False
                     if first_index - 1 >= 0:
                         allow_initial_replacement = any(punc in vbm.tokens[first_index - 1].text for punc in (".", "?", "!"))
                     else:
                         allow_initial_replacement = True
-                    replacement_index = 0 if allow_initial_replacement else -1
+                    replacement_index = 0 if allow_initial_replacement else 1
 
                     # Make sure that we only replace words from the first matching word instead of allowing a full replacement
                     if not allow_initial_replacement:
                         for index, score in enumerate(self_repair_match.scores):
-                            if score >= 1:
+                            if score == EXACT_MATCH:
                                 replacement_index = index
                                 insert = " ".join(insert.split()[index:])
                                 break
                     
                     if replacement_index >= 0:
-                        start_index = self_repair_match.indices[replacement_index]
-                        end_index = self_repair_match.indices[-1]
+                        start_index = self_repair_match.buffer_indices[replacement_index][0]
+                        end_index = self_repair_match.buffer_indices[-1][-1]
 
                         tokens = vbm.tokens
                         if start_index < len(tokens) and end_index < len(tokens):
@@ -417,23 +402,13 @@ class Actions:
         """Move the caret to the given phrase and select it"""
         global mutator
 
-        if isinstance(phrase, List):
-            keys = mutator.select_phrases(phrase)
-            mutator.disable_tracking()
-            if keys:
-                for key in keys:
-                    actions.key(key)
-            mutator.enable_tracking()
-        else:
-            if mutator.has_phrase(phrase):
-                keys = mutator.select_phrase(phrase)
-                mutator.disable_tracking()
-                if keys:
-                    for key in keys:
-                        actions.key(key)
-                mutator.enable_tracking()
-            else:
-                raise RuntimeError("Input phrase '" + phrase + "' could not be found in the buffer")
+        phrases = phrase if isinstance(phrase, List) else [phrase]
+        keys = mutator.select_phrases(phrases)
+        mutator.disable_tracking()
+        if keys:
+            for key in keys:
+                actions.key(key)
+        mutator.enable_tracking()
             
     def virtual_buffer_correction(selection_and_correction: List[str]):
         """Select a fuzzy match of the words and apply the given words"""

@@ -32,17 +32,22 @@ class VirtualBuffer:
         return self.caret_tracker.is_selecting()
     
     def is_phrase_selected(self, phrase: str) -> bool:
-        return self.matcher.has_matching_phrase(self, phrase)
+        return self.matcher.is_phrase_selected(self, phrase)
 
     def clear_tokens(self):
         self.set_tokens()
 
-    def set_tokens(self, tokens: List[VirtualBufferToken] = None):
+    def set_tokens(self, tokens: List[VirtualBufferToken] = None, move_cursor_to_end: bool = False):
         if tokens is None:
             self.caret_tracker.clear()
             self.tokens = []
         else:
             self.tokens = tokens
+        
+        if move_cursor_to_end:
+            self.reformat_tokens()
+            self.caret_tracker.clear()
+            self.caret_tracker.append_before_caret("".join([token.text for token in self.tokens]))
 
     def determine_leftmost_token_index(self):
         return self.determine_token_index(self.caret_tracker.get_leftmost_caret_index())
@@ -153,12 +158,12 @@ class VirtualBuffer:
         if reindex:
             self.reformat_tokens()
 
-    def find_self_repair(self, phrase: List[str]):
-        self_repair_matches = self.matcher.find_self_repair_match(self, phrase)
+    def find_self_repair(self, phrase: List[str], verbose: bool = False):
+        self_repair_matches = self.matcher.find_self_repair_match(self, phrase, verbose=verbose)
         return self_repair_matches
 
-    def detect_self_repair(self, phrase: List[str]) -> bool:
-        return self.find_self_repair(phrase) is not None
+    def detect_self_repair(self, phrase: List[str], verbose: bool = False) -> bool:
+        return self.find_self_repair(phrase, verbose=verbose) is not None
 
     def detect_merge_strategy(self, token_index: int, token_character_index: int, token: VirtualBufferToken) -> (int, int, int):
         current_strategy = MERGE_STRATEGY_IGNORE
@@ -515,10 +520,6 @@ class VirtualBuffer:
         return keys
     
     def select_phrases(self, phrases: List[str], match_threshold: float = SELECTION_THRESHOLD, extend_selection: bool = False, for_correction: bool = False, verbose = False) -> List[str]:
-        # For a single phrase we can fall back to a single selection
-        if len(phrases) == 1:
-            return self.select_phrase(phrases[0], extend_selection)
-
         # Determine if we need to cycle between selections
         should_go_to_next_occurrence = not extend_selection
         if should_go_to_next_occurrence:
@@ -527,24 +528,33 @@ class VirtualBuffer:
                 if not should_go_to_next_occurrence:
                     break
 
-        best_match = self.matcher.find_best_match_by_phrases_2(self, phrases, match_threshold, should_go_to_next_occurrence, True, for_correction=for_correction, verbose=verbose)
-        if best_match is not None and len(best_match) > 0:
-            return self.select_token_range(best_match[0], best_match[-1])
+        best_match_tokens, best_match = self.matcher.find_best_match_by_phrases(self, phrases, match_threshold, should_go_to_next_occurrence, selecting=True, for_correction=for_correction, verbose=verbose)
+        if best_match_tokens is not None and len(best_match_tokens) > 0:
+            if verbose:
+                print("!!! SELECTING !!!", best_match_tokens)
+            return self.select_token_range(best_match_tokens[0], best_match_tokens[-1], extend_selection=extend_selection)
         else:
             return []
 
     def select_token_range(self, start_token: VirtualBufferToken, end_token: VirtualBufferToken, extend_selection: bool = False ) -> List[str]:
+        should_extend_right = True
+        # When our end token isn't past the rightmost cursor
+        # We do not want to extend to the end token
+        # Because it would reset the existing selection to just our current query
+        if extend_selection and self.is_selecting():
+            right_index = self.caret_tracker.get_rightmost_caret_index()
+            if right_index[0] < end_token.line_index or \
+                ( right_index[0] == end_token.line_index and right_index[1] < end_token.index_from_line_end ):
+                should_extend_right = False
+
         if not extend_selection:
             keys = self.navigate_to_token(start_token, 0)
         else:
-            keys = self.select_token(start_token, extend_selection)
-        keys.extend( self.select_token(end_token, True))
+            keys = self.select_token(start_token, extend_selection)            
 
+        if should_extend_right:
+            keys.extend( self.select_token(end_token, True))
         return keys
-
-    def select_phrase(self, phrase: str, extend_selection: bool = False) -> List[str]:        
-        token = self.find_token_by_phrase(phrase, 0, not extend_selection and self.matcher.is_phrase_selected(self, phrase), True)
-        return self.select_token(token, extend_selection)
     
     def select_token(self, token: VirtualBufferToken, extend_selection: bool = False) -> List[str]:
         if token:
@@ -582,7 +592,7 @@ class VirtualBuffer:
                     if caret_on_left_side:
                         reset_selection = True
 
-                if not reset_selection:                    
+                if not reset_selection:
                     after_keys = self.navigate_to_token(token, token_caret_end, True)
                     keys.extend(after_keys)
 
@@ -592,14 +602,14 @@ class VirtualBuffer:
                     for key in key_events:
                         self.apply_key(key)
                     keys.extend(key_events)
-
+                    
                     select_key_events = self.caret_tracker.navigate_to_position(right_caret[0], right_caret[1], False, True)
                     for key in select_key_events:
                         self.apply_key(key)
                     keys.extend(select_key_events)
             
             # New selection - just go to the token and select it
-            else:                
+            else:
                 before_keys = self.navigate_to_token(token, 0, False)
                 keys.extend(before_keys)
                 after_keys = self.navigate_to_token(token, -1, True)

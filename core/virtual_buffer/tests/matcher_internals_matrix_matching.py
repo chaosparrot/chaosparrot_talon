@@ -2,7 +2,7 @@ from ..matcher import VirtualBufferMatcher
 from ...phonetics.phonetics import PhoneticSearch
 from ...phonetics.detection import EXACT_MATCH, HOMOPHONE_MATCH
 from ..indexer import text_to_virtual_buffer_tokens
-from ..typing import VirtualBufferMatchMatrix, VirtualBufferMatch, SELECTION_THRESHOLD, CORRECTION_THRESHOLD
+from ..typing import VirtualBufferMatchMatrix, VirtualBufferMatch, VirtualBufferMatchVisitCache, SELECTION_THRESHOLD, CORRECTION_THRESHOLD
 from ...utils.test import create_test_suite
 
 max_score_per_word = EXACT_MATCH
@@ -38,17 +38,22 @@ def test_no_matches_for_too_high_threshold(assertion):
     assertion("Using the query 'an incredible' on 'test with the incredibly good match' and an impossibly high threshold")
     calculation = matcher.generate_match_calculation(["an", "incredible"], select_threshold)
     submatrix = VirtualBufferMatchMatrix(0, get_tokens_from_sentence("test with the incredibly good match"))
-    matches = matcher.find_matches_in_matrix(calculation, submatrix, max_score_per_word)
+    calculation.cache.index_matrix(submatrix)
+    matcher.find_potential_submatrices(calculation, submatrix, [])
+    matches, _ = matcher.find_matches_in_matrix(calculation, submatrix, max_score_per_word)
     assertion("    should give no possible matches", len(matches) == 0)
 
 def test_one_match_for_highest_threshold(assertion):
     matcher = get_matcher()
 
     assertion("Using the query 'an incredible' on 'test with the incredibly good match' and a threshold which will only reach one match")
-    calculation = matcher.generate_match_calculation(["an", "incredible"], select_threshold)
+    calculation = matcher.generate_match_calculation(["an", "incredible"], correct_threshold, purpose="correction")
     submatrix = VirtualBufferMatchMatrix(0, get_tokens_from_sentence("test with the incredibly good match"))
-    matches = matcher.find_matches_in_matrix(calculation, submatrix, select_threshold)
-    assertion("    should give 1 possible match with single tokens", len([match for match in matches if len(match.buffer) == 2]) == 1)
+    calculation.cache.index_matrix(submatrix)
+    matcher.find_potential_submatrices(calculation, submatrix, [])
+
+    matches, _ = matcher.find_matches_in_matrix(calculation, submatrix, 0)
+    assertion("    should give 1 possible match with single tokens", len([match for match in matches if len(match.buffer) == 2 and len(match.query_indices) == 2]) == 1)
 
 def test_multiple_single_matches(assertion):
     matcher = get_matcher()
@@ -56,8 +61,10 @@ def test_multiple_single_matches(assertion):
     assertion("Using the query 'an incredible' on 'test with the incredibly good match' and a threshold which will only reach one match")
     calculation = matcher.generate_match_calculation(["an", "incredible"], select_threshold)
     submatrix = VirtualBufferMatchMatrix(0, get_tokens_from_sentence("test with the incredibly good match which had an incredible run up to"))
-    matches = matcher.find_matches_in_matrix(calculation, submatrix, select_threshold)
-    assertion("    should give 2 possible matches with single tokens", len([match for match in matches if len(match.buffer) == 2]) == 2)
+    calculation.cache.index_matrix(submatrix)
+    matcher.find_potential_submatrices(calculation, submatrix, [])
+    matches, _ = matcher.find_matches_in_matrix(calculation, submatrix, select_threshold)
+    assertion("    should give 1 possible match with single tokens", len([match for match in matches if len(match.buffer) == 2 and len(match.query_indices) == 2]) == 1)
     assertion("    should have 'an incredible' as the highest match", " ".join([match for match in matches if len(match.buffer) == 2][0].buffer) == "an incredible")
     assertion( " ".join([match for match in matches if len(match.buffer) == 2][0].buffer) )
 
@@ -102,30 +109,30 @@ def test_sorting_matches_for_correction(assertion):
     match_3_skip = VirtualBufferMatch([[0], [1]], [[6], [8]], ["this", "the"], ["this", "is", "the"], [EXACT_MATCH, 0, EXACT_MATCH], EXACT_MATCH, 2)
 
     assertion("Sorting two matches for correction where an overlap occurs with where one score is better than the other")
-    assertion("    should favour the one with the better score", matcher.compare_match_trees_by_distance_and_score(match_1, match_2_homophone) == 1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_2_homophone, match_1) == -1)
+    assertion("    should favour the one with the better score", matcher.compare_match_trees_for_correction(match_1, match_2_homophone) == 1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_2_homophone, match_1) == -1)
     assertion("Sorting two matches for correction where an overlap occurs with the same score, but one has more matches")
-    assertion("    should favour the one with the most matches", matcher.compare_match_trees_by_distance_and_score(match_1, match_2_missing_one) == 1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_2_missing_one, match_1) == -1)
+    assertion("    should favour the one with the most matches", matcher.compare_match_trees_for_correction(match_1, match_2_missing_one) == 1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_2_missing_one, match_1) == -1)
     assertion("Sorting two matches for correction where an overlap occurs with the same score and no skips")
-    assertion("    should result in no change in the order", matcher.compare_match_trees_by_distance_and_score(match_1, match_2) == 0)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_2, match_1) == 0)    
+    assertion("    should result in no change in the order", matcher.compare_match_trees_for_correction(match_1, match_2) == 0)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_2, match_1) == 0)    
     assertion("Sorting two matches for correction where an overlap occurs with the same score and the same amount of skips")
-    assertion("    should result in no change in the order", matcher.compare_match_trees_by_distance_and_score(match_1_skip, match_2_skip) == 0)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_2_skip, match_1_skip) == 0)
+    assertion("    should result in no change in the order", matcher.compare_match_trees_for_correction(match_1_skip, match_2_skip) == 0)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_2_skip, match_1_skip) == 0)
     assertion("Sorting two matches for correction where an overlap occurs with the same score with one having more skips than the other")
-    assertion("    should favour the one with the least skips", matcher.compare_match_trees_by_distance_and_score(match_1, match_2_skip) == 1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_2_skip, match_1) == -1)
+    assertion("    should favour the one with the least skips", matcher.compare_match_trees_for_correction(match_1, match_2_skip) == 1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_2_skip, match_1) == -1)
 
     assertion("Sorting two matches for correction where no overlap occurs but there is a score difference")
-    assertion("    should favour the one with the shortest distance even if the other has a higher score", matcher.compare_match_trees_by_distance_and_score(match_1, match_3_homophone) == -1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_3_homophone, match_1) == 1)
+    assertion("    should favour the one with the shortest distance even if the other has a higher score", matcher.compare_match_trees_for_correction(match_1, match_3_homophone) == -1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_3_homophone, match_1) == 1)
     assertion("Sorting two matches for correction where no overlap occurs and there is no score difference")
-    assertion("    should favour the one with the shortest distance", matcher.compare_match_trees_by_distance_and_score(match_1, match_3) == -1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_3, match_1) == 1)
+    assertion("    should favour the one with the shortest distance", matcher.compare_match_trees_for_correction(match_1, match_3) == -1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_3, match_1) == 1)
     assertion("Sorting two matches for correction where no overlap occurs but the closest has more skips")
-    assertion("    should favour the one with the shortest distance", matcher.compare_match_trees_by_distance_and_score(match_1, match_3_skip) == -1)
-    assertion("    and the order should not matter", matcher.compare_match_trees_by_distance_and_score(match_3_skip, match_1) == 1)
+    assertion("    should favour the one with the shortest distance", matcher.compare_match_trees_for_correction(match_1, match_3_skip) == -1)
+    assertion("    and the order should not matter", matcher.compare_match_trees_for_correction(match_3_skip, match_1) == 1)
 
 def test_calculating_distance_for_matches(assertion):
     match_1 = VirtualBufferMatch([[0], [1]], [[0], [1]], ["this", "is"], ["this", "is"], [EXACT_MATCH, EXACT_MATCH], EXACT_MATCH, 0)
@@ -141,7 +148,7 @@ def test_calculating_distance_for_matches(assertion):
     assertion("    a match starting at token 10 should have a distance of 10", match_3.distance == 10)
 
     assertion("If the cursor spreads from the first to the fourth token")
-    match_1.calculate_distance(0, 3)    
+    match_1.calculate_distance(0, 3)
     match_2.calculate_distance(0, 3)
     match_3.calculate_distance(0, 3)
     assertion("    a match starting at token 0 should have a distance of 0", match_1.distance == 0)
@@ -171,4 +178,3 @@ suite.add_test(test_multiple_single_matches)
 suite.add_test(test_sorting_matches_for_selection)
 suite.add_test(test_sorting_matches_for_correction)
 suite.add_test(test_calculating_distance_for_matches)
-suite.run()
