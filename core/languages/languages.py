@@ -1,5 +1,6 @@
 from talon import Context, Module, actions
 from dataclasses import dataclass
+from typing import Union
 
 @dataclass
 class Language:
@@ -86,12 +87,12 @@ ctx.lists["self.code_language"] = {l.spoken_form: l.id for l in languages}
 # Disable `code.language` when not in command mode
 @ctx_other.action_class("code")
 class OtherCodeActions:
-    def language() -> str:
+    def language() -> Union[str, set[str]]:
         return ""
 
 @ctx.action_class("code")
 class CodeActions:
-    def language() -> str:
+    def language() -> Union[str, set[str]]:
         if forced_language:
             return forced_language
         file_extension = actions.win.file_ext()
